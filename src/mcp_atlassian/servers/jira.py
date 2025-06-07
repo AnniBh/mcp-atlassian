@@ -14,6 +14,7 @@ from mcp_atlassian.models.jira.common import JiraUser
 from mcp_atlassian.servers.dependencies import get_jira_fetcher
 from mcp_atlassian.utils import convert_empty_defaults_to_none
 from mcp_atlassian.utils.decorators import check_write_access
+from mcp_atlassian.utils.logging import log_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ async def get_user_profile(
             f"get_user_profile failed for '{user_identifier}': {error_message}",
         )
         response_data = error_result
+    tool_name = get_user_profile.__name__
+    await log_tool_invocation(logger, tool_name, jira, response_data)
     return json.dumps(response_data, indent=2, ensure_ascii=False)
 
 
@@ -162,6 +165,8 @@ async def get_issue(
         update_history=update_history,
     )
     result = issue.to_simplified_dict()
+    tool_name = get_issue.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -250,6 +255,8 @@ async def search(
         projects_filter=projects_filter,
     )
     result = search_result.to_simplified_dict()
+    tool_name = search.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -284,6 +291,8 @@ async def search_fields(
     """
     jira = await get_jira_fetcher(ctx)
     result = jira.search_fields(keyword, limit=limit, refresh=refresh)
+    tool_name = search_fields.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -316,6 +325,8 @@ async def get_project_issues(
         project_key=project_key, start=start_at, limit=limit
     )
     result = search_result.to_simplified_dict()
+    tool_name = get_project_issues.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -336,6 +347,8 @@ async def get_transitions(
     jira = await get_jira_fetcher(ctx)
     # Underlying method returns list[dict] in the desired format
     transitions = jira.get_available_transitions(issue_key)
+    tool_name = get_transitions.__name__
+    await log_tool_invocation(logger, tool_name, jira, transitions)
     return json.dumps(transitions, indent=2, ensure_ascii=False)
 
 
@@ -356,6 +369,8 @@ async def get_worklog(
     jira = await get_jira_fetcher(ctx)
     worklogs = jira.get_worklogs(issue_key)
     result = {"worklogs": worklogs}
+    tool_name = get_worklog.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -379,6 +394,8 @@ async def download_attachments(
     """
     jira = await get_jira_fetcher(ctx)
     result = jira.download_issue_attachments(issue_key=issue_key, target_dir=target_dir)
+    tool_name = download_attachments.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -429,6 +446,8 @@ async def get_agile_boards(
         limit=limit,
     )
     result = [board.to_simplified_dict() for board in boards]
+    tool_name = get_agile_boards.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -507,6 +526,8 @@ async def get_board_issues(
         expand=expand,
     )
     result = search_result.to_simplified_dict()
+    tool_name = get_board_issues.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -545,6 +566,8 @@ async def get_sprints_from_board(
         board_id=board_id, state=state, start=start_at, limit=limit
     )
     result = [sprint.to_simplified_dict() for sprint in sprints]
+    tool_name = get_sprints_from_board.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -594,6 +617,8 @@ async def get_sprint_issues(
         sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit
     )
     result = search_result.to_simplified_dict()
+    tool_name = get_sprint_issues.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -610,6 +635,8 @@ async def get_link_types(ctx: Context) -> str:
     jira = await get_jira_fetcher(ctx)
     link_types = jira.get_issue_link_types()
     formatted_link_types = [link_type.to_simplified_dict() for link_type in link_types]
+    tool_name = get_link_types.__name__
+    await log_tool_invocation(logger, tool_name, jira, formatted_link_types)
     return json.dumps(formatted_link_types, indent=2, ensure_ascii=False)
 
 
@@ -712,6 +739,8 @@ async def create_issue(
         **extra_fields,
     )
     result = issue.to_simplified_dict()
+    tool_name = create_issue.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(
         {"message": "Issue created successfully", "issue": result},
         indent=2,
@@ -785,6 +814,8 @@ async def batch_create_issues(
         "message": message,
         "issues": [issue.to_simplified_dict() for issue in created_issues],
     }
+    tool_name = batch_create_issues.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -858,6 +889,8 @@ async def batch_get_changelogs(
                 ],
             }
         )
+    tool_name = batch_get_changelogs.__name__
+    await log_tool_invocation(logger, tool_name, jira, results)
     return json.dumps(results, indent=2, ensure_ascii=False)
 
 
@@ -953,8 +986,11 @@ async def update_issue(
             and "attachment_results" in issue.custom_fields
         ):
             result["attachment_results"] = issue.custom_fields["attachment_results"]
+        response_data = {"message": "Issue updated successfully", "issue": result}
+        tool_name = update_issue.__name__
+        await log_tool_invocation(logger, tool_name, jira, response_data)
         return json.dumps(
-            {"message": "Issue updated successfully", "issue": result},
+            response_data,
             indent=2,
             ensure_ascii=False,
         )
@@ -985,6 +1021,8 @@ async def delete_issue(
     deleted = jira.delete_issue(issue_key)
     result = {"message": f"Issue {issue_key} has been deleted successfully."}
     # The underlying method raises on failure, so if we reach here, it's success.
+    tool_name = delete_issue.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1011,6 +1049,8 @@ async def add_comment(
     jira = await get_jira_fetcher(ctx)
     # add_comment returns dict
     result = jira.add_comment(issue_key, comment)
+    tool_name = add_comment.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1079,6 +1119,8 @@ async def add_worklog(
         remaining_estimate=remaining_estimate,
     )
     result = {"message": "Worklog added successfully", "worklog": worklog_result}
+    tool_name = add_worklog.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1112,6 +1154,8 @@ async def link_to_epic(
         "message": f"Issue {issue_key} has been linked to epic {epic_key}.",
         "issue": issue.to_simplified_dict(),
     }
+    tool_name = link_to_epic.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1181,6 +1225,8 @@ async def create_issue_link(
         link_data["comment"] = comment_obj
 
     result = jira.create_issue_link(link_data)
+    tool_name = create_issue_link.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1207,6 +1253,8 @@ async def remove_issue_link(
         raise ValueError("link_id is required")
 
     result = jira.remove_issue_link(link_id)  # Returns dict on success
+    tool_name = remove_issue_link.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1281,6 +1329,8 @@ async def transition_issue(
         "message": f"Issue {issue_key} transitioned successfully",
         "issue": issue.to_simplified_dict() if issue else None,
     }
+    tool_name = transition_issue.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1325,7 +1375,10 @@ async def create_sprint(
         end_date=end_date,
         goal=goal,
     )
-    return json.dumps(sprint.to_simplified_dict(), indent=2, ensure_ascii=False)
+    result = sprint.to_simplified_dict()
+    tool_name = create_sprint.__name__
+    await log_tool_invocation(logger, tool_name, jira, result)
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
@@ -1380,9 +1433,14 @@ async def update_sprint(
         error_payload = {
             "error": f"Failed to update sprint {sprint_id}. Check logs for details."
         }
+        tool_name = update_sprint.__name__
+        await log_tool_invocation(logger, tool_name, jira, error_payload)
         return json.dumps(error_payload, indent=2, ensure_ascii=False)
     else:
-        return json.dumps(sprint.to_simplified_dict(), indent=2, ensure_ascii=False)
+        result = sprint.to_simplified_dict()
+        tool_name = update_sprint.__name__
+        await log_tool_invocation(logger, tool_name, jira, result)
+        return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "read"})
@@ -1393,6 +1451,8 @@ async def get_project_versions(
     """Get all fix versions for a specific Jira project."""
     jira = await get_jira_fetcher(ctx)
     versions = jira.get_project_versions(project_key)
+    tool_name = get_project_versions.__name__
+    await log_tool_invocation(logger, tool_name, jira, versions)
     return json.dumps(versions, indent=2, ensure_ascii=False)
 
 
