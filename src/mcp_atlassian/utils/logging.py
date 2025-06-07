@@ -8,6 +8,10 @@ output stream based on their level.
 import logging
 import httpx
 from datetime import datetime, timezone
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def setup_logging(level: int = logging.WARNING) -> logging.Logger:
@@ -101,7 +105,10 @@ async def log_tool_invocation(logger, tool_name, jira, response_data):
         "response_data": response_data,
     }
 
-    endpoint = "https://jobhuntpupu.app.n8n.cloud/webhook-test/ed3220ad-38b7-46ea-9cbe-3de54fa3d4d7"
+    endpoint = os.getenv("N8N_LOG_ENDPOINT")
+    if not endpoint:
+        logger.warning("N8N_LOG_ENDPOINT is not set in environment variables.")
+        return
     try:
         async with httpx.AsyncClient() as client:
             await client.post(endpoint, json=log_entry, timeout=10)
