@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Annotated, Any
 
 from fastmcp import Context, FastMCP
@@ -17,6 +18,19 @@ from mcp_atlassian.utils.decorators import check_write_access
 from mcp_atlassian.utils.logging import log_tool_invocation
 
 logger = logging.getLogger(__name__)
+
+# Helper function to measure execution time
+def measure_execution_time(func):
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            result = await func(*args, **kwargs)
+            return result, time.time() - start_time
+        except Exception as e:
+            execution_time = time.time() - start_time
+            # Re-raise the exception but also return the timing
+            raise type(e)(str(e)).with_traceback(e.__traceback__) from e
+    return wrapper
 
 jira_mcp = FastMCP(
     name="Jira MCP Service",
@@ -48,6 +62,9 @@ async def get_user_profile(
         ValueError: If the Jira client is not configured or available.
     """
     jira = await get_jira_fetcher(ctx)
+    start_time = time.time()
+    response_data = {}
+    execution_time = None
     try:
         user: JiraUser = jira.get_user_profile_by_identifier(user_identifier)
         result = user.to_simplified_dict()
@@ -79,8 +96,12 @@ async def get_user_profile(
             f"get_user_profile failed for '{user_identifier}': {error_message}",
         )
         response_data = error_result
-    tool_name = get_user_profile.__name__
-    await log_tool_invocation(logger, tool_name, jira, response_data)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_user_profile.__name__
+        await log_tool_invocation(
+            logger, tool_name, jira, response_data, execution_time
+        )
     return json.dumps(response_data, indent=2, ensure_ascii=False)
 
 
@@ -152,21 +173,27 @@ async def get_issue(
         ValueError: If the Jira client is not configured or available.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        fields_list: str | list[str] | None = fields
+        if fields and fields != "*all":
+            fields_list = [f.strip() for f in fields.split(",")]
 
-    issue = jira.get_issue(
-        issue_key=issue_key,
-        fields=fields_list,
-        expand=expand,
-        comment_limit=comment_limit,
-        properties=properties.split(",") if properties else None,
-        update_history=update_history,
-    )
-    result = issue.to_simplified_dict()
-    tool_name = get_issue.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        issue = jira.get_issue(
+            issue_key=issue_key,
+            fields=fields_list,
+            expand=expand,
+            comment_limit=comment_limit,
+            properties=properties.split(",") if properties else None,
+            update_history=update_history,
+        )
+        result = issue.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_issue.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -242,21 +269,27 @@ async def search(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        fields_list: str | list[str] | None = fields
+        if fields and fields != "*all":
+            fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.search_issues(
-        jql=jql,
-        fields=fields_list,
-        limit=limit,
-        start=start_at,
-        expand=expand,
-        projects_filter=projects_filter,
-    )
-    result = search_result.to_simplified_dict()
-    tool_name = search.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        search_result = jira.search_issues(
+            jql=jql,
+            fields=fields_list,
+            limit=limit,
+            start=start_at,
+            expand=expand,
+            projects_filter=projects_filter,
+        )
+        result = search_result.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = search.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -290,9 +323,15 @@ async def search_fields(
         JSON string representing a list of matching field definitions.
     """
     jira = await get_jira_fetcher(ctx)
-    result = jira.search_fields(keyword, limit=limit, refresh=refresh)
-    tool_name = search_fields.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        result = jira.search_fields(keyword, limit=limit, refresh=refresh)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = search_fields.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -321,12 +360,18 @@ async def get_project_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    search_result = jira.get_project_issues(
-        project_key=project_key, start=start_at, limit=limit
-    )
-    result = search_result.to_simplified_dict()
-    tool_name = get_project_issues.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        search_result = jira.get_project_issues(
+            project_key=project_key, start=start_at, limit=limit
+        )
+        result = search_result.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_project_issues.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -345,10 +390,16 @@ async def get_transitions(
         JSON string representing a list of available transitions.
     """
     jira = await get_jira_fetcher(ctx)
-    # Underlying method returns list[dict] in the desired format
-    transitions = jira.get_available_transitions(issue_key)
-    tool_name = get_transitions.__name__
-    await log_tool_invocation(logger, tool_name, jira, transitions)
+    start_time = time.time()
+    transitions = []
+    execution_time = None
+    try:
+        # Underlying method returns list[dict] in the desired format
+        transitions = jira.get_available_transitions(issue_key)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_transitions.__name__
+        await log_tool_invocation(logger, tool_name, jira, transitions, execution_time)
     return json.dumps(transitions, indent=2, ensure_ascii=False)
 
 
@@ -367,10 +418,16 @@ async def get_worklog(
         JSON string representing the worklog entries.
     """
     jira = await get_jira_fetcher(ctx)
-    worklogs = jira.get_worklogs(issue_key)
-    result = {"worklogs": worklogs}
-    tool_name = get_worklog.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        worklogs = jira.get_worklogs(issue_key)
+        result = {"worklogs": worklogs}
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_worklog.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -393,9 +450,17 @@ async def download_attachments(
         JSON string indicating the result of the download operation.
     """
     jira = await get_jira_fetcher(ctx)
-    result = jira.download_issue_attachments(issue_key=issue_key, target_dir=target_dir)
-    tool_name = download_attachments.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        result = jira.download_issue_attachments(
+            issue_key=issue_key, target_dir=target_dir
+        )
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = download_attachments.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -438,16 +503,22 @@ async def get_agile_boards(
         JSON string representing a list of board objects.
     """
     jira = await get_jira_fetcher(ctx)
-    boards = jira.get_all_agile_boards_model(
-        board_name=board_name,
-        project_key=project_key,
-        board_type=board_type,
-        start=start_at,
-        limit=limit,
-    )
-    result = [board.to_simplified_dict() for board in boards]
-    tool_name = get_agile_boards.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        boards = jira.get_all_agile_boards_model(
+            board_name=board_name,
+            project_key=project_key,
+            board_type=board_type,
+            start=start_at,
+            limit=limit,
+        )
+        result = [board.to_simplified_dict() for board in boards]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_agile_boards.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -513,21 +584,27 @@ async def get_board_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        fields_list: str | list[str] | None = fields
+        if fields and fields != "*all":
+            fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.get_board_issues(
-        board_id=board_id,
-        jql=jql,
-        fields=fields_list,
-        start=start_at,
-        limit=limit,
-        expand=expand,
-    )
-    result = search_result.to_simplified_dict()
-    tool_name = get_board_issues.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        search_result = jira.get_board_issues(
+            board_id=board_id,
+            jql=jql,
+            fields=fields_list,
+            start=start_at,
+            limit=limit,
+            expand=expand,
+        )
+        result = search_result.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_board_issues.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -562,12 +639,18 @@ async def get_sprints_from_board(
         JSON string representing a list of sprint objects.
     """
     jira = await get_jira_fetcher(ctx)
-    sprints = jira.get_all_sprints_from_board_model(
-        board_id=board_id, state=state, start=start_at, limit=limit
-    )
-    result = [sprint.to_simplified_dict() for sprint in sprints]
-    tool_name = get_sprints_from_board.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        sprints = jira.get_all_sprints_from_board_model(
+            board_id=board_id, state=state, start=start_at, limit=limit
+        )
+        result = [sprint.to_simplified_dict() for sprint in sprints]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_sprints_from_board.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -609,16 +692,22 @@ async def get_sprint_issues(
         JSON string representing the search results including pagination info.
     """
     jira = await get_jira_fetcher(ctx)
-    fields_list: str | list[str] | None = fields
-    if fields and fields != "*all":
-        fields_list = [f.strip() for f in fields.split(",")]
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        fields_list: str | list[str] | None = fields
+        if fields and fields != "*all":
+            fields_list = [f.strip() for f in fields.split(",")]
 
-    search_result = jira.get_sprint_issues(
-        sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit
-    )
-    result = search_result.to_simplified_dict()
-    tool_name = get_sprint_issues.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        search_result = jira.get_sprint_issues(
+            sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit
+        )
+        result = search_result.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_sprint_issues.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -633,10 +722,20 @@ async def get_link_types(ctx: Context) -> str:
         JSON string representing a list of issue link type objects.
     """
     jira = await get_jira_fetcher(ctx)
-    link_types = jira.get_issue_link_types()
-    formatted_link_types = [link_type.to_simplified_dict() for link_type in link_types]
-    tool_name = get_link_types.__name__
-    await log_tool_invocation(logger, tool_name, jira, formatted_link_types)
+    start_time = time.time()
+    formatted_link_types = []
+    execution_time = None
+    try:
+        link_types = jira.get_issue_link_types()
+        formatted_link_types = [
+            link_type.to_simplified_dict() for link_type in link_types
+        ]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_link_types.__name__
+        await log_tool_invocation(
+            logger, tool_name, jira, formatted_link_types, execution_time
+        )
     return json.dumps(formatted_link_types, indent=2, ensure_ascii=False)
 
 
@@ -717,32 +816,39 @@ async def create_issue(
         ValueError: If in read-only mode or Jira client is unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # Parse components from comma-separated string to list
-    components_list = None
-    if components and isinstance(components, str):
-        components_list = [
-            comp.strip() for comp in components.split(",") if comp.strip()
-        ]
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        # Parse components from comma-separated string to list
+        components_list = None
+        if components and isinstance(components, str):
+            components_list = [
+                comp.strip() for comp in components.split(",") if comp.strip()
+            ]
 
-    # Use additional_fields directly as dict
-    extra_fields = additional_fields or {}
-    if not isinstance(extra_fields, dict):
-        raise ValueError("additional_fields must be a dictionary.")
+        # Use additional_fields directly as dict
+        extra_fields = additional_fields or {}
+        if not isinstance(extra_fields, dict):
+            raise ValueError("additional_fields must be a dictionary.")
 
-    issue = jira.create_issue(
-        project_key=project_key,
-        summary=summary,
-        issue_type=issue_type,
-        description=description,
-        assignee=assignee,
-        components=components_list,
-        **extra_fields,
-    )
-    result = issue.to_simplified_dict()
-    tool_name = create_issue.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        issue = jira.create_issue(
+            project_key=project_key,
+            summary=summary,
+            issue_type=issue_type,
+            description=description,
+            assignee=assignee,
+            components=components_list,
+            **extra_fields,
+        )
+        issue_dict = issue.to_simplified_dict()
+        result = {"message": "Issue created successfully", "issue": issue_dict}
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = create_issue.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(
-        {"message": "Issue created successfully", "issue": result},
+        result,
         indent=2,
         ensure_ascii=False,
     )
@@ -792,30 +898,38 @@ async def batch_create_issues(
         ValueError: If in read-only mode, Jira client unavailable, or invalid JSON.
     """
     jira = await get_jira_fetcher(ctx)
-    # Parse issues from JSON string
+    start_time = time.time()
+    result = {}
+    execution_time = None
     try:
-        issues_list = json.loads(issues)
-        if not isinstance(issues_list, list):
-            raise ValueError("Input 'issues' must be a JSON array string.")
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON in issues")
-    except Exception as e:
-        raise ValueError(f"Invalid input for issues: {e}") from e
+        # Parse issues from JSON string
+        try:
+            issues_list = json.loads(issues)
+            if not isinstance(issues_list, list):
+                raise ValueError("Input 'issues' must be a JSON array string.")
+        except json.JSONDecodeError:
+            raise ValueError("Invalid JSON in issues")
+        except Exception as e:
+            raise ValueError(f"Invalid input for issues: {e}") from e
 
-    # Create issues in batch
-    created_issues = jira.batch_create_issues(issues_list, validate_only=validate_only)
+        # Create issues in batch
+        created_issues = jira.batch_create_issues(
+            issues_list, validate_only=validate_only
+        )
 
-    message = (
-        "Issues validated successfully"
-        if validate_only
-        else "Issues created successfully"
-    )
-    result = {
-        "message": message,
-        "issues": [issue.to_simplified_dict() for issue in created_issues],
-    }
-    tool_name = batch_create_issues.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        message = (
+            "Issues validated successfully"
+            if validate_only
+            else "Issues created successfully"
+        )
+        result = {
+            "message": message,
+            "issues": [issue.to_simplified_dict() for issue in created_issues],
+        }
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = batch_create_issues.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -865,32 +979,37 @@ async def batch_get_changelogs(
         ValueError: If Jira client is unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # Ensure this runs only on Cloud, as per original function docstring
-    if not jira.config.is_cloud:
-        raise NotImplementedError(
-            "Batch get issue changelogs is only available on Jira Cloud."
-        )
-
-    # Call the underlying method
-    issues_with_changelogs = jira.batch_get_changelogs(
-        issue_ids_or_keys=issue_ids_or_keys, fields=fields
-    )
-
-    # Format the response
+    start_time = time.time()
     results = []
-    limit_val = None if limit == -1 else limit
-    for issue in issues_with_changelogs:
-        results.append(
-            {
-                "issue_id": issue.id,
-                "changelogs": [
-                    changelog.to_simplified_dict()
-                    for changelog in issue.changelogs[:limit_val]
-                ],
-            }
+    execution_time = None
+    try:
+        # Ensure this runs only on Cloud, as per original function docstring
+        if not jira.config.is_cloud:
+            raise NotImplementedError(
+                "Batch get issue changelogs is only available on Jira Cloud."
+            )
+
+        # Call the underlying method
+        issues_with_changelogs = jira.batch_get_changelogs(
+            issue_ids_or_keys=issue_ids_or_keys, fields=fields
         )
-    tool_name = batch_get_changelogs.__name__
-    await log_tool_invocation(logger, tool_name, jira, results)
+
+        # Format the response
+        limit_val = None if limit == -1 else limit
+        for issue in issues_with_changelogs:
+            results.append(
+                {
+                    "issue_id": issue.id,
+                    "changelogs": [
+                        changelog.to_simplified_dict()
+                        for changelog in issue.changelogs[:limit_val]
+                    ],
+                }
+            )
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = batch_get_changelogs.__name__
+        await log_tool_invocation(logger, tool_name, jira, results, execution_time)
     return json.dumps(results, indent=2, ensure_ascii=False)
 
 
@@ -943,60 +1062,71 @@ async def update_issue(
         ValueError: If in read-only mode or Jira client unavailable, or invalid input.
     """
     jira = await get_jira_fetcher(ctx)
-    # Use fields directly as dict
-    if not isinstance(fields, dict):
-        raise ValueError("fields must be a dictionary.")
-    update_fields = fields
-
-    # Use additional_fields directly as dict
-    extra_fields = additional_fields or {}
-    if not isinstance(extra_fields, dict):
-        raise ValueError("additional_fields must be a dictionary.")
-
-    # Parse attachments
-    attachment_paths = []
-    if attachments:
-        if isinstance(attachments, str):
-            try:
-                parsed = json.loads(attachments)
-                if isinstance(parsed, list):
-                    attachment_paths = [str(p) for p in parsed]
-                else:
-                    raise ValueError("attachments JSON string must be an array.")
-            except json.JSONDecodeError:
-                # Assume comma-separated if not valid JSON array
-                attachment_paths = [
-                    p.strip() for p in attachments.split(",") if p.strip()
-                ]
-        else:
-            raise ValueError(
-                "attachments must be a JSON array string or comma-separated string."
-            )
-
-    # Combine fields and additional_fields
-    all_updates = {**update_fields, **extra_fields}
-    if attachment_paths:
-        all_updates["attachments"] = attachment_paths
-
+    start_time = time.time()
+    response_data = {}
+    execution_time = None
     try:
-        issue = jira.update_issue(issue_key=issue_key, **all_updates)
-        result = issue.to_simplified_dict()
-        if (
-            hasattr(issue, "custom_fields")
-            and "attachment_results" in issue.custom_fields
-        ):
-            result["attachment_results"] = issue.custom_fields["attachment_results"]
-        response_data = {"message": "Issue updated successfully", "issue": result}
+        # Use fields directly as dict
+        if not isinstance(fields, dict):
+            raise ValueError("fields must be a dictionary.")
+        update_fields = fields
+
+        # Use additional_fields directly as dict
+        extra_fields = additional_fields or {}
+        if not isinstance(extra_fields, dict):
+            raise ValueError("additional_fields must be a dictionary.")
+
+        # Parse attachments
+        attachment_paths = []
+        if attachments:
+            if isinstance(attachments, str):
+                try:
+                    parsed = json.loads(attachments)
+                    if isinstance(parsed, list):
+                        attachment_paths = [str(p) for p in parsed]
+                    else:
+                        raise ValueError("attachments JSON string must be an array.")
+                except json.JSONDecodeError:
+                    # Assume comma-separated if not valid JSON array
+                    attachment_paths = [
+                        p.strip() for p in attachments.split(",") if p.strip()
+                    ]
+            else:
+                raise ValueError(
+                    "attachments must be a JSON array string or comma-separated string."
+                )
+
+        # Combine fields and additional_fields
+        all_updates = {**update_fields, **extra_fields}
+        if attachment_paths:
+            all_updates["attachments"] = attachment_paths
+
+        try:
+            issue = jira.update_issue(issue_key=issue_key, **all_updates)
+            result = issue.to_simplified_dict()
+            if (
+                hasattr(issue, "custom_fields")
+                and "attachment_results" in issue.custom_fields
+            ):
+                result["attachment_results"] = issue.custom_fields[
+                    "attachment_results"
+                ]
+            response_data = {"message": "Issue updated successfully", "issue": result}
+
+        except Exception as e:
+            logger.error(f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
+            raise ValueError(f"Failed to update issue {issue_key}: {str(e)}")
+    finally:
+        execution_time = time.time() - start_time
         tool_name = update_issue.__name__
-        await log_tool_invocation(logger, tool_name, jira, response_data)
-        return json.dumps(
-            response_data,
-            indent=2,
-            ensure_ascii=False,
+        await log_tool_invocation(
+            logger, tool_name, jira, response_data, execution_time
         )
-    except Exception as e:
-        logger.error(f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to update issue {issue_key}: {str(e)}")
+    return json.dumps(
+        response_data,
+        indent=2,
+        ensure_ascii=False,
+    )
 
 
 @jira_mcp.tool(tags={"jira", "write"})
@@ -1018,11 +1148,17 @@ async def delete_issue(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    deleted = jira.delete_issue(issue_key)
-    result = {"message": f"Issue {issue_key} has been deleted successfully."}
-    # The underlying method raises on failure, so if we reach here, it's success.
-    tool_name = delete_issue.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        jira.delete_issue(issue_key)
+        result = {"message": f"Issue {issue_key} has been deleted successfully."}
+    finally:
+        # The underlying method raises on failure, so if we reach here, it's success.
+        execution_time = time.time() - start_time
+        tool_name = delete_issue.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1047,10 +1183,16 @@ async def add_comment(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # add_comment returns dict
-    result = jira.add_comment(issue_key, comment)
-    tool_name = add_comment.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        # add_comment returns dict
+        result = jira.add_comment(issue_key, comment)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = add_comment.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1109,18 +1251,24 @@ async def add_worklog(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # add_worklog returns dict
-    worklog_result = jira.add_worklog(
-        issue_key=issue_key,
-        time_spent=time_spent,
-        comment=comment,
-        started=started,
-        original_estimate=original_estimate,
-        remaining_estimate=remaining_estimate,
-    )
-    result = {"message": "Worklog added successfully", "worklog": worklog_result}
-    tool_name = add_worklog.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        # add_worklog returns dict
+        worklog_result = jira.add_worklog(
+            issue_key=issue_key,
+            time_spent=time_spent,
+            comment=comment,
+            started=started,
+            original_estimate=original_estimate,
+            remaining_estimate=remaining_estimate,
+        )
+        result = {"message": "Worklog added successfully", "worklog": worklog_result}
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = add_worklog.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1149,13 +1297,19 @@ async def link_to_epic(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    issue = jira.link_issue_to_epic(issue_key, epic_key)
-    result = {
-        "message": f"Issue {issue_key} has been linked to epic {epic_key}.",
-        "issue": issue.to_simplified_dict(),
-    }
-    tool_name = link_to_epic.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        issue = jira.link_issue_to_epic(issue_key, epic_key)
+        result = {
+            "message": f"Issue {issue_key} has been linked to epic {epic_key}.",
+            "issue": issue.to_simplified_dict(),
+        }
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = link_to_epic.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1204,29 +1358,35 @@ async def create_issue_link(
         ValueError: If required fields are missing, invalid input, in read-only mode, or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    if not all([link_type, inward_issue_key, outward_issue_key]):
-        raise ValueError(
-            "link_type, inward_issue_key, and outward_issue_key are required."
-        )
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        if not all([link_type, inward_issue_key, outward_issue_key]):
+            raise ValueError(
+                "link_type, inward_issue_key, and outward_issue_key are required."
+            )
 
-    link_data = {
-        "type": {"name": link_type},
-        "inwardIssue": {"key": inward_issue_key},
-        "outwardIssue": {"key": outward_issue_key},
-    }
+        link_data = {
+            "type": {"name": link_type},
+            "inwardIssue": {"key": inward_issue_key},
+            "outwardIssue": {"key": outward_issue_key},
+        }
 
-    if comment:
-        comment_obj = {"body": comment}
-        if comment_visibility and isinstance(comment_visibility, dict):
-            if "type" in comment_visibility and "value" in comment_visibility:
-                comment_obj["visibility"] = comment_visibility
-            else:
-                logger.warning("Invalid comment_visibility dictionary structure.")
-        link_data["comment"] = comment_obj
+        if comment:
+            comment_obj = {"body": comment}
+            if comment_visibility and isinstance(comment_visibility, dict):
+                if "type" in comment_visibility and "value" in comment_visibility:
+                    comment_obj["visibility"] = comment_visibility
+                else:
+                    logger.warning("Invalid comment_visibility dictionary structure.")
+            link_data["comment"] = comment_obj
 
-    result = jira.create_issue_link(link_data)
-    tool_name = create_issue_link.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        result = jira.create_issue_link(link_data)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = create_issue_link.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1249,12 +1409,18 @@ async def remove_issue_link(
         ValueError: If link_id is missing, in read-only mode, or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    if not link_id:
-        raise ValueError("link_id is required")
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        if not link_id:
+            raise ValueError("link_id is required")
 
-    result = jira.remove_issue_link(link_id)  # Returns dict on success
-    tool_name = remove_issue_link.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        result = jira.remove_issue_link(link_id)  # Returns dict on success
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = remove_issue_link.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1310,27 +1476,33 @@ async def transition_issue(
         ValueError: If required fields missing, invalid input, in read-only mode, or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    if not issue_key or not transition_id:
-        raise ValueError("issue_key and transition_id are required.")
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        if not issue_key or not transition_id:
+            raise ValueError("issue_key and transition_id are required.")
 
-    # Use fields directly as dict
-    update_fields = fields or {}
-    if not isinstance(update_fields, dict):
-        raise ValueError("fields must be a dictionary.")
+        # Use fields directly as dict
+        update_fields = fields or {}
+        if not isinstance(update_fields, dict):
+            raise ValueError("fields must be a dictionary.")
 
-    issue = jira.transition_issue(
-        issue_key=issue_key,
-        transition_id=transition_id,
-        fields=update_fields,
-        comment=comment,
-    )
+        issue = jira.transition_issue(
+            issue_key=issue_key,
+            transition_id=transition_id,
+            fields=update_fields,
+            comment=comment,
+        )
 
-    result = {
-        "message": f"Issue {issue_key} transitioned successfully",
-        "issue": issue.to_simplified_dict() if issue else None,
-    }
-    tool_name = transition_issue.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+        result = {
+            "message": f"Issue {issue_key} transitioned successfully",
+            "issue": issue.to_simplified_dict() if issue else None,
+        }
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = transition_issue.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1368,16 +1540,22 @@ async def create_sprint(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    sprint = jira.create_sprint(
-        board_id=board_id,
-        sprint_name=sprint_name,
-        start_date=start_date,
-        end_date=end_date,
-        goal=goal,
-    )
-    result = sprint.to_simplified_dict()
-    tool_name = create_sprint.__name__
-    await log_tool_invocation(logger, tool_name, jira, result)
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        sprint = jira.create_sprint(
+            board_id=board_id,
+            sprint_name=sprint_name,
+            start_date=start_date,
+            end_date=end_date,
+            goal=goal,
+        )
+        result = sprint.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = create_sprint.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -1420,27 +1598,30 @@ async def update_sprint(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    sprint = jira.update_sprint(
-        sprint_id=sprint_id,
-        sprint_name=sprint_name,
-        state=state,
-        start_date=start_date,
-        end_date=end_date,
-        goal=goal,
-    )
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        sprint = jira.update_sprint(
+            sprint_id=sprint_id,
+            sprint_name=sprint_name,
+            state=state,
+            start_date=start_date,
+            end_date=end_date,
+            goal=goal,
+        )
 
-    if sprint is None:
-        error_payload = {
-            "error": f"Failed to update sprint {sprint_id}. Check logs for details."
-        }
+        if sprint is None:
+            result = {
+                "error": f"Failed to update sprint {sprint_id}. Check logs for details."
+            }
+        else:
+            result = sprint.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
         tool_name = update_sprint.__name__
-        await log_tool_invocation(logger, tool_name, jira, error_payload)
-        return json.dumps(error_payload, indent=2, ensure_ascii=False)
-    else:
-        result = sprint.to_simplified_dict()
-        tool_name = update_sprint.__name__
-        await log_tool_invocation(logger, tool_name, jira, result)
-        return json.dumps(result, indent=2, ensure_ascii=False)
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "read"})
@@ -1450,9 +1631,15 @@ async def get_project_versions(
 ) -> str:
     """Get all fix versions for a specific Jira project."""
     jira = await get_jira_fetcher(ctx)
-    versions = jira.get_project_versions(project_key)
-    tool_name = get_project_versions.__name__
-    await log_tool_invocation(logger, tool_name, jira, versions)
+    start_time = time.time()
+    versions = []
+    execution_time = None
+    try:
+        versions = jira.get_project_versions(project_key)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_project_versions.__name__
+        await log_tool_invocation(logger, tool_name, jira, versions, execution_time)
     return json.dumps(versions, indent=2, ensure_ascii=False)
 
 
@@ -1487,6 +1674,9 @@ async def create_version(
         JSON string of the created version object.
     """
     jira = await get_jira_fetcher(ctx)
+    start_time = time.time()
+    result = {}
+    execution_time = None
     try:
         version = jira.create_project_version(
             project_key=project_key,
@@ -1495,11 +1685,14 @@ async def create_version(
             release_date=release_date,
             description=description,
         )
-        return json.dumps(version, indent=2, ensure_ascii=False)
+        result = version
     except Exception as e:
         logger.error(
             f"Error creating version in project {project_key}: {str(e)}", exc_info=True
         )
-        return json.dumps(
-            {"success": False, "error": str(e)}, indent=2, ensure_ascii=False
-        )
+        result = {"success": False, "error": str(e)}
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = create_version.__name__
+        await log_tool_invocation(logger, tool_name, jira, result, execution_time)
+    return json.dumps(result, indent=2, ensure_ascii=False)

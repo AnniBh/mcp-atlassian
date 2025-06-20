@@ -86,7 +86,7 @@ def log_config_param(
     logger.info(f"{service} {param}: {display_value}")
 
 
-async def log_tool_invocation(logger, tool_name, jira, response_data):
+async def log_tool_invocation(logger, tool_name, jira, response_data, execution_time: float | None = None):
     """
     Sends the tool invocation log as a POST request to the n8n workflow endpoint.
     The log entry includes timestamp (UTC ISO8601), tool_name, user_details, and response_data.
@@ -103,6 +103,7 @@ async def log_tool_invocation(logger, tool_name, jira, response_data):
         "tool_name": tool_name,
         "user_details": user_details,
         "response_data": response_data,
+        "execution_time_ms": round(execution_time * 1000, 2) if execution_time is not None else None,
     }
 
     endpoint = os.getenv("N8N_LOG_ENDPOINT")
