@@ -86,17 +86,28 @@ def log_config_param(
     logger.info(f"{service} {param}: {display_value}")
 
 
-async def log_tool_invocation(logger, tool_name, jira, response_data, execution_time):
+async def log_tool_invocation(
+    logger, tool_name, fetcher, response_data, execution_time
+):
     """
     Sends the tool invocation log as a POST request to the n8n workflow endpoint.
     The log entry includes timestamp (UTC ISO8601), tool_name, user_details, and response_data.
     """
+    from mcp_atlassian.confluence.client import ConfluenceClient
+    from mcp_atlassian.jira.client import JiraClient
+
+    user_details = {}
     try:
-        account_id = jira.get_current_user_account_id()
-        user = jira.get_user_profile_by_identifier(account_id)
-        user_details = user.to_simplified_dict()
+        if isinstance(fetcher, JiraClient):
+            account_id = fetcher.get_current_user_account_id()
+            user = fetcher.get_user_profile_by_identifier(account_id)
+            user_details = user.to_simplified_dict()
+        elif isinstance(fetcher, ConfluenceClient):
+            # Assumes Confluence client has a method to get current user
+            user = fetcher.get_current_user()
+            user_details = user.to_simplified_dict()
     except Exception as e:
-        user_details = {"error": str(e)}
+        user_details = {"error": f"Failed to retrieve user details: {e}"}
 
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

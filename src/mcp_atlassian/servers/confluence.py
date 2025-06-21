@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Annotated
 
 from fastmcp import Context, FastMCP
@@ -12,6 +13,7 @@ from mcp_atlassian.utils.decorators import (
     check_write_access,
     convert_empty_defaults_to_none,
 )
+from mcp_atlassian.utils.logging import log_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -82,31 +84,41 @@ async def search(
         JSON string representing a list of simplified Confluence page objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    # Check if the query is a simple search term or already a CQL query
-    if query and not any(
-        x in query for x in ["=", "~", ">", "<", " AND ", " OR ", "currentUser()"]
-    ):
-        original_query = query
-        try:
-            query = f'siteSearch ~ "{original_query}"'
-            logger.info(
-                f"Converting simple search term to CQL using siteSearch: {query}"
-            )
+    start_time = time.time()
+    search_results = []
+    execution_time = None
+    try:
+        # Check if the query is a simple search term or already a CQL query
+        if query and not any(
+            x in query for x in ["=", "~", ">", "<", " AND ", " OR ", "currentUser()"]
+        ):
+            original_query = query
+            try:
+                query = f'siteSearch ~ "{original_query}"'
+                logger.info(
+                    f"Converting simple search term to CQL using siteSearch: {query}"
+                )
+                pages = confluence_fetcher.search(
+                    query, limit=limit, spaces_filter=spaces_filter
+                )
+            except Exception as e:
+                logger.warning(f"siteSearch failed ('{e}'), falling back to text search.")
+                query = f'text ~ "{original_query}"'
+                logger.info(f"Falling back to text search with CQL: {query}")
+                pages = confluence_fetcher.search(
+                    query, limit=limit, spaces_filter=spaces_filter
+                )
+        else:
             pages = confluence_fetcher.search(
                 query, limit=limit, spaces_filter=spaces_filter
             )
-        except Exception as e:
-            logger.warning(f"siteSearch failed ('{e}'), falling back to text search.")
-            query = f'text ~ "{original_query}"'
-            logger.info(f"Falling back to text search with CQL: {query}")
-            pages = confluence_fetcher.search(
-                query, limit=limit, spaces_filter=spaces_filter
-            )
-    else:
-        pages = confluence_fetcher.search(
-            query, limit=limit, spaces_filter=spaces_filter
+        search_results = [page.to_simplified_dict() for page in pages]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = search.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, search_results, execution_time
         )
-    search_results = [page.to_simplified_dict() for page in pages]
     return json.dumps(search_results, indent=2, ensure_ascii=False)
 
 
@@ -177,52 +189,49 @@ async def get_page(
         JSON string representing the page content and/or metadata, or an error if not found or parameters are invalid.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    page_object = None
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        page_object = None
 
-    if page_id:
-        if title or space_key:
-            logger.warning(
-                "page_id was provided; title and space_key parameters will be ignored."
+        if page_id:
+            if title or space_key:
+                logger.warning(
+                    "page_id was provided; title and space_key parameters will be ignored."
+                )
+            try:
+                page_object = confluence_fetcher.get_page_content(
+                    page_id, convert_to_markdown=convert_to_markdown
+                )
+            except Exception as e:
+                logger.error(f"Error fetching page by ID '{page_id}': {e}")
+                result = {"error": f"Failed to retrieve page by ID '{page_id}': {e}"}
+        elif title and space_key:
+            page_object = confluence_fetcher.get_page_by_title(
+                space_key, title, convert_to_markdown=convert_to_markdown
             )
-        try:
-            page_object = confluence_fetcher.get_page_content(
-                page_id, convert_to_markdown=convert_to_markdown
-            )
-        except Exception as e:
-            logger.error(f"Error fetching page by ID '{page_id}': {e}")
-            return json.dumps(
-                {"error": f"Failed to retrieve page by ID '{page_id}': {e}"},
-                indent=2,
-                ensure_ascii=False,
-            )
-    elif title and space_key:
-        page_object = confluence_fetcher.get_page_by_title(
-            space_key, title, convert_to_markdown=convert_to_markdown
-        )
-        if not page_object:
-            return json.dumps(
-                {
+            if not page_object:
+                result = {
                     "error": f"Page with title '{title}' not found in space '{space_key}'."
-                },
-                indent=2,
-                ensure_ascii=False,
+                }
+        else:
+            raise ValueError(
+                "Either 'page_id' OR both 'title' and 'space_key' must be provided."
             )
-    else:
-        raise ValueError(
-            "Either 'page_id' OR both 'title' and 'space_key' must be provided."
-        )
 
-    if not page_object:
-        return json.dumps(
-            {"error": "Page not found with the provided identifiers."},
-            indent=2,
-            ensure_ascii=False,
+        if not page_object:
+            result = {"error": "Page not found with the provided identifiers."}
+        elif include_metadata:
+            result = {"metadata": page_object.to_simplified_dict()}
+        else:
+            result = {"content": {"value": page_object.content}}
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_page.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
         )
-
-    if include_metadata:
-        result = {"metadata": page_object.to_simplified_dict()}
-    else:
-        result = {"content": {"value": page_object.content}}
 
     return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -286,32 +295,27 @@ async def get_page_children(
         JSON string representing a list of child page objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    if include_content and "body" not in expand:
-        expand = f"{expand},body.storage" if expand else "body.storage"
-
+    start_time = time.time()
+    result = []
+    execution_time = None
     try:
-        pages = confluence_fetcher.get_page_children(
+        if include_content and "body" not in expand:
+            expand = f"{expand},body.storage" if expand else "body.storage"
+
+        children = confluence_fetcher.get_page_children(
             page_id=parent_id,
             start=start,
             limit=limit,
             expand=expand,
             convert_to_markdown=convert_to_markdown,
         )
-        child_pages = [page.to_simplified_dict() for page in pages]
-        result = {
-            "parent_id": parent_id,
-            "count": len(child_pages),
-            "limit_requested": limit,
-            "start_requested": start,
-            "results": child_pages,
-        }
-    except Exception as e:
-        logger.error(
-            f"Error getting/processing children for page ID {parent_id}: {e}",
-            exc_info=True,
+        result = [child.to_simplified_dict() for child in children]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_page_children.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
         )
-        result = {"error": f"Failed to get child pages: {e}"}
-
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -339,9 +343,19 @@ async def get_comments(
         JSON string representing a list of comment objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    comments = confluence_fetcher.get_page_comments(page_id)
-    formatted_comments = [comment.to_simplified_dict() for comment in comments]
-    return json.dumps(formatted_comments, indent=2, ensure_ascii=False)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        comments = confluence_fetcher.get_page_comments(page_id)
+        result = [comment.to_simplified_dict() for comment in comments]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_comments.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @confluence_mcp.tool(tags={"confluence", "read"})
@@ -368,9 +382,19 @@ async def get_labels(
         JSON string representing a list of label objects.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    labels = confluence_fetcher.get_page_labels(page_id)
-    formatted_labels = [label.to_simplified_dict() for label in labels]
-    return json.dumps(formatted_labels, indent=2, ensure_ascii=False)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        labels = confluence_fetcher.get_page_labels(page_id)
+        result = [label.to_simplified_dict() for label in labels]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = get_labels.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @confluence_mcp.tool(tags={"confluence", "write"})
@@ -394,9 +418,19 @@ async def add_label(
         ValueError: If in read-only mode or Confluence client is unavailable.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    labels = confluence_fetcher.add_page_label(page_id, name)
-    formatted_labels = [label.to_simplified_dict() for label in labels]
-    return json.dumps(formatted_labels, indent=2, ensure_ascii=False)
+    start_time = time.time()
+    result = []
+    execution_time = None
+    try:
+        labels = confluence_fetcher.add_page_label(page_id, name)
+        result = [label.to_simplified_dict() for label in labels]
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = add_label.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
@@ -441,14 +475,24 @@ async def create_page(
         ValueError: If in read-only mode or Confluence client is unavailable.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    page = confluence_fetcher.create_page(
-        space_key=space_key,
-        title=title,
-        body=content,
-        parent_id=parent_id,
-        is_markdown=True,
-    )
-    result = page.to_simplified_dict()
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        page = confluence_fetcher.create_page(
+            space_key=space_key,
+            title=title,
+            body=content,
+            parent_id=parent_id,
+            is_markdown=True,
+        )
+        result = page.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = create_page.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
     return json.dumps(
         {"message": "Page created successfully", "page": result},
         indent=2,
@@ -495,21 +539,31 @@ async def update_page(
         ValueError: If Confluence client is not configured or available.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
-    # TODO: revert this once Cursor IDE handles optional parameters with Union types correctly.
-    actual_parent_id = parent_id if parent_id else None
+    start_time = time.time()
+    result = {}
+    execution_time = None
+    try:
+        # TODO: revert this once Cursor IDE handles optional parameters with Union types correctly.
+        actual_parent_id = parent_id if parent_id else None
 
-    updated_page = confluence_fetcher.update_page(
-        page_id=page_id,
-        title=title,
-        body=content,
-        is_minor_edit=is_minor_edit,
-        version_comment=version_comment,
-        is_markdown=True,
-        parent_id=actual_parent_id,
-    )
-    page_data = updated_page.to_simplified_dict()
+        page = confluence_fetcher.update_page(
+            page_id=page_id,
+            title=title,
+            body=content,
+            is_minor_edit=is_minor_edit,
+            version_comment=version_comment,
+            is_markdown=True,
+            parent_id=actual_parent_id,
+        )
+        result = page.to_simplified_dict()
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = update_page.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
     return json.dumps(
-        {"message": "Page updated successfully", "page": page_data},
+        {"message": "Page updated successfully", "page": result},
         indent=2,
         ensure_ascii=False,
     )
@@ -534,27 +588,31 @@ async def delete_page(
         ValueError: If Confluence client is not configured or available.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
+    start_time = time.time()
+    result = {}
+    execution_time = None
     try:
-        result = confluence_fetcher.delete_page(page_id=page_id)
-        if result:
-            response = {
-                "success": True,
-                "message": f"Page {page_id} deleted successfully",
-            }
+        response = confluence_fetcher.delete_page(page_id)
+        if response.get("success"):
+            result = {"message": f"Page with ID '{page_id}' deleted successfully."}
         else:
-            response = {
-                "success": False,
-                "message": f"Unable to delete page {page_id}. API request completed but deletion unsuccessful.",
+            result = {
+                "error": f"Failed to delete page with ID '{page_id}'. Reason: {response.get('error')}"
             }
     except Exception as e:
         logger.error(f"Error deleting Confluence page {page_id}: {str(e)}")
-        response = {
+        result = {
             "success": False,
             "message": f"Error deleting page {page_id}",
             "error": str(e),
         }
-
-    return json.dumps(response, indent=2, ensure_ascii=False)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = delete_page.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @confluence_mcp.tool(tags={"confluence", "write"})
@@ -582,26 +640,34 @@ async def add_comment(
         ValueError: If in read-only mode or Confluence client is unavailable.
     """
     confluence_fetcher = await get_confluence_fetcher(ctx)
+    start_time = time.time()
+    result = {}
+    execution_time = None
     try:
         comment = confluence_fetcher.add_comment(page_id=page_id, content=content)
         if comment:
             comment_data = comment.to_simplified_dict()
-            response = {
+            result = {
                 "success": True,
                 "message": "Comment added successfully",
                 "comment": comment_data,
             }
         else:
-            response = {
+            result = {
                 "success": False,
                 "message": f"Unable to add comment to page {page_id}. API request completed but comment creation unsuccessful.",
             }
     except Exception as e:
         logger.error(f"Error adding comment to Confluence page {page_id}: {str(e)}")
-        response = {
+        result = {
             "success": False,
             "message": f"Error adding comment to page {page_id}",
             "error": str(e),
         }
-
-    return json.dumps(response, indent=2, ensure_ascii=False)
+    finally:
+        execution_time = time.time() - start_time
+        tool_name = add_comment.__name__
+        await log_tool_invocation(
+            logger, tool_name, confluence_fetcher, result, execution_time
+        )
+    return json.dumps(result, indent=2, ensure_ascii=False)
