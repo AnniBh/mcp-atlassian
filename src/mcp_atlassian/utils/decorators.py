@@ -8,6 +8,8 @@ from fastmcp import Context
 
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.servers.dependencies import get_jira_fetcher
+from mcp_atlassian.utils.logging import log_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -148,3 +150,34 @@ def check_write_access(func: F) -> F:
         return await func(ctx, *args, **kwargs)
 
     return wrapper  # type: ignore
+
+
+def log_tool_timing(func: Callable) -> Callable:
+    """
+    Decorator for FastMCP tools to measure execution time and log the invocation.
+    Assumes the decorated function is async and has `ctx: Context` as its first argument.
+    """
+    @wraps(func)
+    async def wrapper(ctx: Context, *args: Any, **kwargs: Any) -> Any:
+        import time
+        logger = logging.getLogger(func.__module__)
+        start_time = time.time()
+        result = None
+        execution_time = None
+        jira = await get_jira_fetcher(ctx)
+        try:
+            result = await func(ctx, *args, **kwargs)
+            return result
+        finally:
+            execution_time = time.time() - start_time
+            tool_name = func.__name__
+            # If the result is a JSON string, try to load it for logging
+            response_data = result
+            try:
+                import json
+                if isinstance(result, str):
+                    response_data = json.loads(result)
+            except Exception:
+                pass
+            await log_tool_invocation(logger, tool_name, jira, response_data, execution_time)
+    return wrapper
