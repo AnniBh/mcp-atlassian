@@ -7,8 +7,8 @@ Thank you for your interest in contributing to MCP Atlassian! This document prov
 1. Make sure you have Python 3.10+ installed
 2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 3. Fork the repository
-4. Clone your fork: `git clone https://github.com/YOUR-USERNAME/mcp-atlassian.git`
-5. Add the upstream remote: `git remote add upstream https://github.com/sooperset/mcp-atlassian.git`
+4. Clone your fork: `git clone https://github.com/AnniBh/mcp-atlassian`
+5. Add the upstream remote: `git remote add upstream https://github.com/AnniBh/mcp-atlassian`
 6. Install dependencies:
 ```bash
 uv sync --frozen --all-extras --dev
@@ -24,8 +24,8 @@ cp .env.example .env
 
 ## Development Setup with local VSCode devcontainer
 
-1. Clone your fork: `git clone https://github.com/YOUR-USERNAME/mcp-atlassian.git`
-2. Add the upstream remote: `git remote add upstream https://github.com/sooperset/mcp-atlassian.git`
+1. Clone your fork: `git clone https://github.com/AnniBh/mcp-atlassian`
+2. Add the upstream remote: `git remote add upstream https://github.com/AnniBh/mcp-atlassian`
 3. Open the project with VSCode and open with devcontainer
 4. Add this bit of config to your `.vscode/settings.json`:
 ```json

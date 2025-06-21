@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Annotated, Any
 
 from fastmcp import Context, FastMCP
@@ -13,9 +14,23 @@ from mcp_atlassian.jira.constants import DEFAULT_READ_JIRA_FIELDS
 from mcp_atlassian.models.jira.common import JiraUser
 from mcp_atlassian.servers.dependencies import get_jira_fetcher
 from mcp_atlassian.utils import convert_empty_defaults_to_none
-from mcp_atlassian.utils.decorators import check_write_access
+from mcp_atlassian.utils.decorators import check_write_access, log_tool_timing
+from mcp_atlassian.utils.logging import log_tool_invocation
 
 logger = logging.getLogger(__name__)
+
+# Helper function to measure execution time
+def measure_execution_time(func):
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            result = await func(*args, **kwargs)
+            return result, time.time() - start_time
+        except Exception as e:
+            execution_time = time.time() - start_time
+            # Re-raise the exception but also return the timing
+            raise type(e)(str(e)).with_traceback(e.__traceback__) from e
+    return wrapper
 
 jira_mcp = FastMCP(
     name="Jira MCP Service",
@@ -24,6 +39,7 @@ jira_mcp = FastMCP(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_user_profile(
     ctx: Context,
     user_identifier: Annotated[
@@ -83,6 +99,7 @@ async def get_user_profile(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_issue(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -126,7 +143,7 @@ async def get_issue(
     update_history: Annotated[
         bool,
         Field(
-            description="Whether to update the issue view history for the requesting user",
+            description="Whether to update issue view history for the requesting user",
             default=True,
         ),
     ] = True,
@@ -152,7 +169,6 @@ async def get_issue(
     fields_list: str | list[str] | None = fields
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
-
     issue = jira.get_issue(
         issue_key=issue_key,
         fields=fields_list,
@@ -167,6 +183,7 @@ async def get_issue(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def search(
     ctx: Context,
     jql: Annotated[
@@ -240,7 +257,6 @@ async def search(
     fields_list: str | list[str] | None = fields
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
-
     search_result = jira.search_issues(
         jql=jql,
         fields=fields_list,
@@ -254,6 +270,7 @@ async def search(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def search_fields(
     ctx: Context,
     keyword: Annotated[
@@ -288,6 +305,7 @@ async def search_fields(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_project_issues(
     ctx: Context,
     project_key: Annotated[str, Field(description="The project key")],
@@ -320,6 +338,7 @@ async def get_project_issues(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_transitions(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -334,12 +353,12 @@ async def get_transitions(
         JSON string representing a list of available transitions.
     """
     jira = await get_jira_fetcher(ctx)
-    # Underlying method returns list[dict] in the desired format
     transitions = jira.get_available_transitions(issue_key)
     return json.dumps(transitions, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_worklog(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -360,6 +379,7 @@ async def get_worklog(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def download_attachments(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -378,12 +398,15 @@ async def download_attachments(
         JSON string indicating the result of the download operation.
     """
     jira = await get_jira_fetcher(ctx)
-    result = jira.download_issue_attachments(issue_key=issue_key, target_dir=target_dir)
+    result = jira.download_issue_attachments(
+        issue_key=issue_key, target_dir=target_dir
+    )
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_agile_boards(
     ctx: Context,
     board_name: Annotated[
@@ -434,6 +457,7 @@ async def get_agile_boards(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_board_issues(
     ctx: Context,
     board_id: Annotated[str, Field(description="The id of the board (e.g., '1001')")],
@@ -497,7 +521,6 @@ async def get_board_issues(
     fields_list: str | list[str] | None = fields
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
-
     search_result = jira.get_board_issues(
         board_id=board_id,
         jql=jql,
@@ -512,6 +535,7 @@ async def get_board_issues(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_sprints_from_board(
     ctx: Context,
     board_id: Annotated[str, Field(description="The id of board (e.g., '1000')")],
@@ -550,6 +574,7 @@ async def get_sprints_from_board(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_sprint_issues(
     ctx: Context,
     sprint_id: Annotated[str, Field(description="The id of sprint (e.g., '10001')")],
@@ -589,7 +614,6 @@ async def get_sprint_issues(
     fields_list: str | list[str] | None = fields
     if fields and fields != "*all":
         fields_list = [f.strip() for f in fields.split(",")]
-
     search_result = jira.get_sprint_issues(
         sprint_id=sprint_id, fields=fields_list, start=start_at, limit=limit
     )
@@ -598,6 +622,7 @@ async def get_sprint_issues(
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_link_types(ctx: Context) -> str:
     """Get all available issue link types.
 
@@ -609,13 +634,16 @@ async def get_link_types(ctx: Context) -> str:
     """
     jira = await get_jira_fetcher(ctx)
     link_types = jira.get_issue_link_types()
-    formatted_link_types = [link_type.to_simplified_dict() for link_type in link_types]
+    formatted_link_types = [
+        link_type.to_simplified_dict() for link_type in link_types
+    ]
     return json.dumps(formatted_link_types, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def create_issue(
     ctx: Context,
     project_key: Annotated[
@@ -690,18 +718,14 @@ async def create_issue(
         ValueError: If in read-only mode or Jira client is unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # Parse components from comma-separated string to list
     components_list = None
     if components and isinstance(components, str):
         components_list = [
             comp.strip() for comp in components.split(",") if comp.strip()
         ]
-
-    # Use additional_fields directly as dict
     extra_fields = additional_fields or {}
     if not isinstance(extra_fields, dict):
         raise ValueError("additional_fields must be a dictionary.")
-
     issue = jira.create_issue(
         project_key=project_key,
         summary=summary,
@@ -711,9 +735,10 @@ async def create_issue(
         components=components_list,
         **extra_fields,
     )
-    result = issue.to_simplified_dict()
+    issue_dict = issue.to_simplified_dict()
+    result = {"message": "Issue created successfully", "issue": issue_dict}
     return json.dumps(
-        {"message": "Issue created successfully", "issue": result},
+        result,
         indent=2,
         ensure_ascii=False,
     )
@@ -721,6 +746,7 @@ async def create_issue(
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def batch_create_issues(
     ctx: Context,
     issues: Annotated[
@@ -763,18 +789,13 @@ async def batch_create_issues(
         ValueError: If in read-only mode, Jira client unavailable, or invalid JSON.
     """
     jira = await get_jira_fetcher(ctx)
-    # Parse issues from JSON string
-    try:
-        issues_list = json.loads(issues)
-        if not isinstance(issues_list, list):
-            raise ValueError("Input 'issues' must be a JSON array string.")
-    except json.JSONDecodeError:
-        raise ValueError("Invalid JSON in issues")
-    except Exception as e:
-        raise ValueError(f"Invalid input for issues: {e}") from e
+    issues_list = json.loads(issues)
+    if not isinstance(issues_list, list):
+        raise ValueError("Input 'issues' must be a JSON array string.")
 
-    # Create issues in batch
-    created_issues = jira.batch_create_issues(issues_list, validate_only=validate_only)
+    created_issues = jira.batch_create_issues(
+        issues_list, validate_only=validate_only
+    )
 
     message = (
         "Issues validated successfully"
@@ -790,6 +811,7 @@ async def batch_create_issues(
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def batch_get_changelogs(
     ctx: Context,
     issue_ids_or_keys: Annotated[
@@ -834,36 +856,38 @@ async def batch_get_changelogs(
         ValueError: If Jira client is unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # Ensure this runs only on Cloud, as per original function docstring
-    if not jira.config.is_cloud:
-        raise NotImplementedError(
-            "Batch get issue changelogs is only available on Jira Cloud."
+    try:
+        # Ensure this runs only on Cloud, as per original function docstring
+        if not jira.config.is_cloud:
+            raise NotImplementedError(
+                "Batch get issue changelogs is only available on Jira Cloud."
+            )
+
+        # Call the underlying method
+        issues_with_changelogs = jira.batch_get_changelogs(
+            issue_ids_or_keys=issue_ids_or_keys, fields=fields
         )
 
-    # Call the underlying method
-    issues_with_changelogs = jira.batch_get_changelogs(
-        issue_ids_or_keys=issue_ids_or_keys, fields=fields
-    )
-
-    # Format the response
-    results = []
-    limit_val = None if limit == -1 else limit
-    for issue in issues_with_changelogs:
-        results.append(
-            {
-                "issue_id": issue.id,
-                "changelogs": [
-                    changelog.to_simplified_dict()
-                    for changelog in issue.changelogs[:limit_val]
-                ],
-            }
-        )
+        # Format the response
+        limit_val = None if limit == -1 else limit
+        results = []
+        for issue in issues_with_changelogs:
+            results.append(
+                {
+                    "issue_id": issue.id,
+                    "changelogs": [
+                        changelog.to_simplified_dict()
+                        for changelog in issue.changelogs[:limit_val]
+                    ],
+                }
+            )
     return json.dumps(results, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def update_issue(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -910,17 +934,8 @@ async def update_issue(
         ValueError: If in read-only mode or Jira client unavailable, or invalid input.
     """
     jira = await get_jira_fetcher(ctx)
-    # Use fields directly as dict
-    if not isinstance(fields, dict):
-        raise ValueError("fields must be a dictionary.")
     update_fields = fields
-
-    # Use additional_fields directly as dict
     extra_fields = additional_fields or {}
-    if not isinstance(extra_fields, dict):
-        raise ValueError("additional_fields must be a dictionary.")
-
-    # Parse attachments
     attachment_paths = []
     if attachments:
         if isinstance(attachments, str):
@@ -939,32 +954,28 @@ async def update_issue(
             raise ValueError(
                 "attachments must be a JSON array string or comma-separated string."
             )
-
-    # Combine fields and additional_fields
     all_updates = {**update_fields, **extra_fields}
     if attachment_paths:
         all_updates["attachments"] = attachment_paths
-
-    try:
-        issue = jira.update_issue(issue_key=issue_key, **all_updates)
-        result = issue.to_simplified_dict()
-        if (
-            hasattr(issue, "custom_fields")
-            and "attachment_results" in issue.custom_fields
-        ):
-            result["attachment_results"] = issue.custom_fields["attachment_results"]
-        return json.dumps(
-            {"message": "Issue updated successfully", "issue": result},
-            indent=2,
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        logger.error(f"Error updating issue {issue_key}: {str(e)}", exc_info=True)
-        raise ValueError(f"Failed to update issue {issue_key}: {str(e)}")
+    issue = jira.update_issue(issue_key=issue_key, **all_updates)
+    result = issue.to_simplified_dict()
+    if (
+        hasattr(issue, "custom_fields")
+        and "attachment_results" in issue.custom_fields
+    ):
+        result["attachment_results"] = issue.custom_fields[
+            "attachment_results"
+        ]
+    return json.dumps(
+        result,
+        indent=2,
+        ensure_ascii=False,
+    )
 
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def delete_issue(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g. PROJ-123)")],
@@ -982,14 +993,14 @@ async def delete_issue(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    deleted = jira.delete_issue(issue_key)
+    jira.delete_issue(issue_key)
     result = {"message": f"Issue {issue_key} has been deleted successfully."}
-    # The underlying method raises on failure, so if we reach here, it's success.
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def add_comment(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -1009,7 +1020,6 @@ async def add_comment(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # add_comment returns dict
     result = jira.add_comment(issue_key, comment)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -1017,6 +1027,7 @@ async def add_comment(
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def add_worklog(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -1069,7 +1080,6 @@ async def add_worklog(
         ValueError: If in read-only mode or Jira client unavailable.
     """
     jira = await get_jira_fetcher(ctx)
-    # add_worklog returns dict
     worklog_result = jira.add_worklog(
         issue_key=issue_key,
         time_spent=time_spent,
@@ -1084,6 +1094,7 @@ async def add_worklog(
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def link_to_epic(
     ctx: Context,
     issue_key: Annotated[
@@ -1118,6 +1129,7 @@ async def link_to_epic(
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def create_issue_link(
     ctx: Context,
     link_type: Annotated[
@@ -1164,13 +1176,11 @@ async def create_issue_link(
         raise ValueError(
             "link_type, inward_issue_key, and outward_issue_key are required."
         )
-
     link_data = {
         "type": {"name": link_type},
         "inwardIssue": {"key": inward_issue_key},
         "outwardIssue": {"key": outward_issue_key},
     }
-
     if comment:
         comment_obj = {"body": comment}
         if comment_visibility and isinstance(comment_visibility, dict):
@@ -1179,13 +1189,13 @@ async def create_issue_link(
             else:
                 logger.warning("Invalid comment_visibility dictionary structure.")
         link_data["comment"] = comment_obj
-
     result = jira.create_issue_link(link_data)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def remove_issue_link(
     ctx: Context,
     link_id: Annotated[str, Field(description="The ID of the link to remove")],
@@ -1205,7 +1215,6 @@ async def remove_issue_link(
     jira = await get_jira_fetcher(ctx)
     if not link_id:
         raise ValueError("link_id is required")
-
     result = jira.remove_issue_link(link_id)  # Returns dict on success
     return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -1213,6 +1222,7 @@ async def remove_issue_link(
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def transition_issue(
     ctx: Context,
     issue_key: Annotated[str, Field(description="Jira issue key (e.g., 'PROJ-123')")],
@@ -1264,19 +1274,15 @@ async def transition_issue(
     jira = await get_jira_fetcher(ctx)
     if not issue_key or not transition_id:
         raise ValueError("issue_key and transition_id are required.")
-
-    # Use fields directly as dict
     update_fields = fields or {}
     if not isinstance(update_fields, dict):
         raise ValueError("fields must be a dictionary.")
-
     issue = jira.transition_issue(
         issue_key=issue_key,
         transition_id=transition_id,
         fields=update_fields,
         comment=comment,
     )
-
     result = {
         "message": f"Issue {issue_key} transitioned successfully",
         "issue": issue.to_simplified_dict() if issue else None,
@@ -1287,6 +1293,7 @@ async def transition_issue(
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def create_sprint(
     ctx: Context,
     board_id: Annotated[str, Field(description="The id of board (e.g., '1000')")],
@@ -1325,12 +1332,14 @@ async def create_sprint(
         end_date=end_date,
         goal=goal,
     )
-    return json.dumps(sprint.to_simplified_dict(), indent=2, ensure_ascii=False)
+    result = sprint.to_simplified_dict()
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def update_sprint(
     ctx: Context,
     sprint_id: Annotated[str, Field(description="The id of sprint (e.g., '10001')")],
@@ -1375,17 +1384,17 @@ async def update_sprint(
         end_date=end_date,
         goal=goal,
     )
-
     if sprint is None:
-        error_payload = {
+        result = {
             "error": f"Failed to update sprint {sprint_id}. Check logs for details."
         }
-        return json.dumps(error_payload, indent=2, ensure_ascii=False)
     else:
-        return json.dumps(sprint.to_simplified_dict(), indent=2, ensure_ascii=False)
+        result = sprint.to_simplified_dict()
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 @jira_mcp.tool(tags={"jira", "read"})
+@log_tool_timing
 async def get_project_versions(
     ctx: Context,
     project_key: Annotated[str, Field(description="Jira project key (e.g., 'PROJ')")],
@@ -1399,6 +1408,7 @@ async def get_project_versions(
 @convert_empty_defaults_to_none
 @jira_mcp.tool(tags={"jira", "write"})
 @check_write_access
+@log_tool_timing
 async def create_version(
     ctx: Context,
     project_key: Annotated[str, Field(description="Jira project key (e.g., 'PROJ')")],
@@ -1427,19 +1437,12 @@ async def create_version(
         JSON string of the created version object.
     """
     jira = await get_jira_fetcher(ctx)
-    try:
-        version = jira.create_project_version(
-            project_key=project_key,
-            name=name,
-            start_date=start_date,
-            release_date=release_date,
-            description=description,
-        )
-        return json.dumps(version, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(
-            f"Error creating version in project {project_key}: {str(e)}", exc_info=True
-        )
-        return json.dumps(
-            {"success": False, "error": str(e)}, indent=2, ensure_ascii=False
-        )
+    version = jira.create_project_version(
+        project_key=project_key,
+        name=name,
+        start_date=start_date,
+        release_date=release_date,
+        description=description,
+    )
+    result = version
+    return json.dumps(result, indent=2, ensure_ascii=False)

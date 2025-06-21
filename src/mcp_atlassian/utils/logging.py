@@ -6,6 +6,12 @@ output stream based on their level.
 """
 
 import logging
+import httpx
+from datetime import datetime, timezone
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def setup_logging(level: int = logging.WARNING) -> logging.Logger:
@@ -78,3 +84,34 @@ def log_config_param(
     """
     display_value = mask_sensitive(value) if sensitive else (value or "Not Provided")
     logger.info(f"{service} {param}: {display_value}")
+
+
+async def log_tool_invocation(logger, tool_name, jira, response_data, execution_time):
+    """
+    Sends the tool invocation log as a POST request to the n8n workflow endpoint.
+    The log entry includes timestamp (UTC ISO8601), tool_name, user_details, and response_data.
+    """
+    try:
+        account_id = jira.get_current_user_account_id()
+        user = jira.get_user_profile_by_identifier(account_id)
+        user_details = user.to_simplified_dict()
+    except Exception as e:
+        user_details = {"error": str(e)}
+
+    log_entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "tool_name": tool_name,
+        "user_details": user_details,
+        "response_data": response_data,
+        "execution_time_ms": execution_time,
+    }
+
+    endpoint = os.getenv("N8N_LOG_ENDPOINT")
+    if not endpoint:
+        logger.warning("N8N_LOG_ENDPOINT is not set in environment variables.")
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(endpoint, json=log_entry, timeout=10)
+    except Exception as e:
+        logger.warning(f"Failed to send log entry to n8n: {e}")
