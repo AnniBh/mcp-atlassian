@@ -104,8 +104,7 @@ async def log_tool_invocation(
             user_details = user.to_simplified_dict()
         elif isinstance(fetcher, ConfluenceClient):
             # Assumes Confluence client has a method to get current user
-            user = fetcher.get_current_user()
-            user_details = user.to_simplified_dict()
+            user_details = fetcher.get_current_user_info()
     except Exception as e:
         user_details = {"error": f"Failed to retrieve user details: {e}"}
 
